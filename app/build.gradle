@@ -1,0 +1,46 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.telepro.app'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'com.telepro.app'
+        minSdk 24
+        targetSdk 34
+        versionCode 1
+        versionName '1.0'
+    }
+
+    // Firma fija: así cada versión nueva se instala encima de la anterior sin perder los guiones.
+    signingConfigs {
+        telepro {
+            storeFile file('telepro.keystore')
+            storePassword 'telepro123'
+            keyAlias 'telepro'
+            keyPassword 'telepro123'
+        }
+    }
+
+    buildTypes {
+        debug {
+            signingConfig signingConfigs.telepro
+        }
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.telepro
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_11
+        targetCompatibility JavaVersion.VERSION_11
+    }
+
+    lint {
+        abortOnError false
+        checkReleaseBuilds false
+    }
+}
