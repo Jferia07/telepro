@@ -38,7 +38,9 @@
     screen: '<rect x="2" y="4" width="20" height="13" rx="2"/><path d="M8 21h8M12 17v4"/>',
     list: '<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',
     full: '<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>',
-    lines: '<path d="M4 6h16M4 12h16M4 18h10"/>'
+    lines: '<path d="M4 6h16M4 12h16M4 18h10"/>',
+    lineUp: '<path d="M18 15l-6-6-6 6"/>',
+    lineDown: '<path d="M6 9l6 6 6-6"/>'
   };
   const ic = (n, fill) => '<svg class="ic' + (fill ? ' fill' : '') + '" viewBox="0 0 24 24">' + I[n] + '</svg>';
 
@@ -79,8 +81,14 @@
   const qs = new URLSearchParams(location.search);
   const isLoop = ['127.0.0.1', 'localhost', '[::1]'].includes(location.hostname);
   const Native = window.Native || null;
-  let role = qs.get('role') || (isLoop ? 'display' : 'remote');
+  let role = (qs.get('role') || '').toLowerCase();
   let pin = qs.get('k') || '';
+  // Tolera direcciones mal escritas, p. ej. "?role=mirror=123456"
+  const loose = /^([a-z]*)\W+(\d{6})$/.exec(role);
+  if (loose) { role = loose[1]; if (!pin) pin = loose[2]; }
+  if (role.startsWith('mirror') || role.startsWith('pantalla')) role = 'mirror';
+  else if (role === 'display' || (!role && isLoop)) role = 'display';
+  else role = 'remote';
   try { if (!pin) pin = localStorage.getItem('telepro_k') || ''; } catch (e) { /* sin almacenamiento */ }
   const cid = Math.random().toString(36).slice(2, 10);
 
@@ -658,6 +666,8 @@
         case 'sizeDown': set('size', settings.size - 2); break;
         case 'forward': P.seekLines(3); break;
         case 'back': P.seekLines(-3); break;
+        case 'lineDown': P.seekLines(1); break;
+        case 'lineUp': P.seekLines(-1); break;
         case 'restart': P.restart(); break;
         case 'mirror': set('mirror', !settings.mirror); break;
         case 'flipV': set('flipV', !settings.flipV); break;
@@ -838,7 +848,11 @@
   // ---- Segunda pantalla (TV, monitor u otro dispositivo)
   VIEWS.mirror = function () {
     app.innerHTML = '<div class="prompter" id="pr"><div class="m-hud"><button class="btn small" id="mMirror">' + ic('mirror') + 'Espejo</button><button class="btn small icon" id="mFlip" aria-label="Voltear">' + ic('flipv') + '</button>' +
-      '<button class="btn small icon" id="mFull" aria-label="Pantalla completa">' + ic('full') + '</button><button class="btn small icon" id="mExit" aria-label="Salir">' + ic('x') + '</button></div><div class="pr-wait" id="wait"></div></div>';
+      '<button class="btn small icon" id="mFull" aria-label="Pantalla completa">' + ic('full') + '</button><button class="btn small icon" id="mExit" aria-label="Salir">' + ic('x') + '</button></div>' +
+      '<div class="pr-bottom hud" id="mBar"><div class="group"><button class="btn icon" data-h="lineUp" aria-label="Retroceder una línea">' + ic('lineUp') + '</button>' +
+      '<button class="btn icon play" id="mPlay" aria-label="Iniciar o pausar">' + ic('play', 1) + '</button><button class="btn icon" data-h="lineDown" aria-label="Avanzar una línea">' + ic('lineDown') + '</button></div>' +
+      '<div class="group stepper"><button class="btn icon" data-h="speedDown" aria-label="Menos velocidad">' + ic('minus') + '</button><div class="val"><b id="mSpeed">–</b><small>Velocidad</small></div><button class="btn icon" data-h="speedUp" aria-label="Más velocidad">' + ic('plus') + '</button></div></div>' +
+      '<div class="pr-wait" id="wait"></div></div>';
     const root = $('#pr'), wait = $('#wait');
     const P = new Prompter(root, { follower: true });
     const loc = { mirror: false, flipV: false };
@@ -848,6 +862,9 @@
     const loadText = async () => { const s = await Store.get(curId).catch(() => null); if (s) P.setText(s.text); };
     const render = async () => {
       const st = lastState;
+      $('#mBar').style.display = st.view === 'prompter' ? '' : 'none';
+      $('#mPlay').innerHTML = ic(st.playing ? 'pause' : 'play', 1);
+      $('#mSpeed').textContent = st.s ? st.s.speed : '–';
       if (st.view !== 'prompter') {
         wait.style.display = '';
         wait.innerHTML = '<div><b style="color:#fff;font-size:26px">Segunda pantalla lista</b><br><br>' + (online ? 'Esperando a que se abra un guion en la tableta…' : 'Sin conexión con la tableta. Reintentando…') + '</div>';
@@ -863,6 +880,20 @@
     wake();
     root.addEventListener('pointerdown', wake);
     root.addEventListener('pointermove', (e) => { if (e.pointerType === 'mouse') wake(); });
+    $('#mPlay').onclick = () => { cmd('toggle'); wake(); };
+    $$('[data-h]', root).forEach((b) => holdable(b, () => {
+      const a = b.dataset.h, s = lastState.s;
+      if (s && a.startsWith('speed')) { s.speed = clamp(s.speed + (a === 'speedUp' ? 1 : -1), LIMITS.speed[0], LIMITS.speed[1]); $('#mSpeed').textContent = s.speed; }
+      cmd(a);
+      wake();
+    }));
+    view.onKey = (name, repeat) => {
+      const a = DEF_KEYS[name];
+      if (!a || a === 'exit' || a === 'mirror' || (repeat && ['toggle', 'restart'].includes(a))) return false;
+      cmd(a === 'forward' ? 'lineDown' : a === 'back' ? 'lineUp' : a);
+      wake();
+      return true;
+    };
     $('#mMirror').onclick = () => { loc.mirror = !loc.mirror; $('#mMirror').classList.toggle('primary', loc.mirror); applyS(); };
     $('#mFlip').onclick = () => { loc.flipV = !loc.flipV; $('#mFlip').classList.toggle('primary', loc.flipV); applyS(); };
     $('#mFull').onclick = () => { const d = document.documentElement; if (document.fullscreenElement) document.exitFullscreen(); else if (d.requestFullscreen) d.requestFullscreen().catch(() => {}); else toast('Usa «Añadir a pantalla de inicio» para verlo a pantalla completa', 4000); };
